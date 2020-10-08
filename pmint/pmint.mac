@@ -9,6 +9,7 @@
  *  Dimiter Prodanov:
  *  Support for Wright Omega function added
  *  Support for BesselJ and BesselI functions added 
+ *  Support for polylogarithms functions added 
  **************************************/
 
  /**************************************
@@ -35,7 +36,6 @@ pmint_lcm(lst) := block([], if not emptyp(lst) then
 		apply("*", lst)/lreduce('gcd, lst)
 		else lst
 );
-
 
 pmint_total_degree(expr) :=
   if numberp(expr) or floatnump(expr) or bfloatp(expr) then 0
@@ -89,6 +89,7 @@ gradef(tanh(x), 1-tanh(x)^2)$
 Lambert W function
 */
 gradef(lambert_w(x), lambert_w(x)/(x*(lambert_w(x)+1)))$
+alias (W, lambert_w);
 
 /*
 Wright Omega function
@@ -207,6 +208,7 @@ put(bessk1, [ lambda([u], u), false], 'darboux_poly)$
 put(expintegral_ei, [ lambda([u], u), false], 'darboux_poly)$
 put(li2, [ lambda([u], u), false], 'darboux_poly)$
 
+alias(Ei, expintegral_ei);
 
 /*
 put(erf, [ lambda([u], u), false], 'darboux_poly)$
@@ -276,22 +278,21 @@ pmints(intexp, [simpfun]):=block ([ret:nil ],
 /* checks if the the expression contans Bessel functions*/
 besselp(expr):=not (freeof(bessel_j, expr) and freeof(bessel_i, expr) and  freeof(bessel_y, expr) and  freeof(bessel_k, expr) );
 
-/* checks if the the expression contans trigonometric functions*/
+/* checks if the the expression contains trigonometric functions*/
 trigp(expr):=not (freeof(sin, expr) and freeof(cos, expr) and  freeof(tan, expr) and  freeof(cot, expr)
 and  freeof(sec, expr) and  freeof(csc, expr));
 
+/* checks if the the expression contains hyperbolic functions*/
 trighp(expr):=not (freeof(sinh, expr) and freeof(cosh, expr) and  freeof(tanh, expr) and  freeof(coth, expr)
 and  freeof(sech, expr) and  freeof(csch, expr));
 
 pmint(expr, x) := block(
-  [ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr), btrigh:trighp(expr), gx, dd ],
+  [ ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr), btrigh:trighp(expr), gx, dd],
 
   /* 0) preproces expr */
   if convert_trig_functions then (
-	if btrig then
-		ff : convert_to_tan(expr),
-	if btrigh then
-		ff : convert_to_tanh(expr)
+    ff : convert_to_tan(expr),
+	ff : convert_to_tanh(ff)
   ) else
     ff : expr,
  
