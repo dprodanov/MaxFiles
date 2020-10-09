@@ -62,28 +62,35 @@ pmint_allcoeffs(expr, vars) := block([v,e,i,eqs:[expr],eqs1:[], nn],
 
 /**************************************
  *
- *   Change trig function to tan
- *   Make diff(tan(x),x)=1+tan(x)^2 and define diff(lambert_w(x), x)
+ *   Express trig functions to tan
+ *   Make diff(tan(x),x)=1+tan(x)^2  
  *
  **************************************/
 define_variable(convert_trig_functions, true, boolean)$
 
-matchdeclare([%x, %y], true)$
+matchdeclare([%x, %y], true, %z, mapatom)$
 defrule(sin2tan, sin(%x), 2*tan(%x/2)/(tan(%x/2)^2+1))$
 defrule(csc2tan, csc(%x), (tan(%x/2)^2+1)/(2*tan(%x/2)))$
 defrule(cos2tan, cos(%x), (1-tan(%x/2)^2)/(1+tan(%x/2)^2))$
 defrule(sec2tan, sec(%x), (1+tan(%x/2)^2)/(1-tan(%x/2)^2))$
+defrule(tan2tan, tan(%z), 2*tan(%z/2)/(1-tan(%z/2)^2))$
+defrule(cot2tan, cot(%z), (1-tan(%z/2)^2)/(2*tan(%z/2)))$
 
-defrule(sinh2tanh, sinh(%x),  (2*tanh(x/2))/(1-tanh(x/2)^2))$
-defrule(csch2tanh, csch(%x), (1-tanh(x/2)^2)/(2*tanh(x/2)))$
+defrule(sinh2tanh, sinh(%x), (2*tanh(%x/2))/(1-tanh(%x/2)^2))$
+defrule(csch2tanh, csch(%x), (1-tanh(%x/2)^2)/(2*tanh(%x/2)))$
 defrule(cosh2tanh, cosh(%x), (1+tanh(%x/2)^2)/(1-tanh(%x/2)^2))$
 defrule(sech2tanh, sech(%x), (1-tanh(%x/2)^2)/(1+tanh(%x/2)^2))$
+defrule(tanh2tanh, tanh(%z), 2*tanh(%z/2)/(1+tanh(%z/2)^2))$
+defrule(coth2tanh, coth(%z), (1+tanh(%z/2)^2)/(2*tanh(%z/2)))$
 
-convert_to_tan(expr) := ratsimp(apply1(ratsimp(expr), sin2tan, cos2tan, sec2tan, csc2tan))$
-convert_to_tanh(expr) := ratsimp(apply1(ratsimp(expr), sinh2tanh, cosh2tanh, sech2tanh, csch2tanh))$
+convert_to_tan(expr) := ratsimp(apply1(ratsimp(expr), sin2tan, cos2tan, sec2tan, csc2tan, tan2tan, cot2tan))$
+convert_to_tanh(expr) := ratsimp(apply1(ratsimp(expr), sinh2tanh, cosh2tanh, sech2tanh, csch2tanh,tanh2tanh, coth2tanh))$
 
 gradef(tan(x),  1+tan(x)^2)$
+gradef(cot(x), -(tan(x)^2+1)/tan(x)^2))$
+
 gradef(tanh(x), 1-tanh(x)^2)$
+gradef(coth(x), (tanh(x)^2-1)/tanh(x)^2)$
 
 /*
 Lambert W function
@@ -168,7 +175,12 @@ matchdeclare([%m], atom);
 defrule(tan2sin, tan(%m/2),  sin(%m)/(1+cos(%m)))$
 defrule(tanh2sinh, tanh(%m/2),  sinh(%m)/(1+cosh(%m)))$
 
-convert_from_tan(expr):=ratsimp(apply1(expr, tan2sin))$
+convert_from_tan(expr):=block([ret],
+	ret: apply1(expr, tan2sin),
+	ret: ratsimp(ret),
+	ret: trigrat(ret)
+);
+	
 convert_from_tanh(expr):=ratsimp(apply1(expr, tanh2sinh))$
 
 /*
@@ -262,7 +274,7 @@ pmints(intexp, [simpfun]):=block ([ret:nil ],
 		ret: map(lambda([u], pmints (u, simpfun)), intexp) 
  	elseif sop=nounify(integrate) then (
 		ret:subst(nounify(integrate)= lambda ([u,v], 
-				pmint(u,v)), intexp
+				pmintr(u,v)), intexp
 		)
 	),
 	if not emptyp(simpfun) then (
@@ -273,6 +285,19 @@ pmints(intexp, [simpfun]):=block ([ret:nil ],
 		)
 	),
 	ret
+);
+
+pmintr(expr, x):=block ([u, ret],
+ if mapatom(expr) then pmint(expr, x)
+ else 
+	if op(expr)="+" or op(expr)="+" then
+		map(lambda([u], pmint(u, x)), expr)
+	elseif op(expr)="/" then (
+		ret: partfrac(expr, x),
+		ret:pmintr(ret, x),
+		logcontract(ret)
+	)else
+		pmint(expr, x)
 );
 
 /* checks if the the expression contans Bessel functions*/
@@ -286,10 +311,13 @@ and  freeof(sec, expr) and  freeof(csc, expr));
 trighp(expr):=not (freeof(sinh, expr) and freeof(cosh, expr) and  freeof(tanh, expr) and  freeof(coth, expr)
 and  freeof(sech, expr) and  freeof(csch, expr));
 
-pmint(expr, x) := block(
-  [ ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr), btrigh:trighp(expr), gx, dd],
 
-  /* 0) preproces expr */
+pmint(expr, x) := block(
+  [ ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr), btrigh:trighp(expr), gx, dd, logexpand:super],
+  
+  /* 0) preprocess expr */
+  /*expansion of logarithms */
+  expr:expand(expr,0),
   if convert_trig_functions then (
     ff : convert_to_tan(expr),
 	ff : convert_to_tanh(ff)
@@ -345,8 +373,9 @@ pmint(expr, x) := block(
   fint : subst(lout, pm_integrate(subst(lin, ff), dx, q, vars, ls)),
   
   
-   
-  if not(mapatom(fint)) and freeof( 'integrate, fint) then block([dfint : diff(fint, x), re ],
+  /* 5) verifying the candiadate solution */
+  if not(mapatom(fint)) and freeof( 'integrate, fint) then block(
+  [dfint : diff(fint, x), re ],
   display(fint),
   /* checking the solution */
   re:dfint-expr,
@@ -365,6 +394,7 @@ pmint(expr, x) := block(
 				fint:'integrate(expr, x),
 				return(fint)
 	))))),
+	fint: logcontract(fint),
 	if bconvert then
 		fint: convert_b2bess(fint),
 
