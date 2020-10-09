@@ -87,7 +87,7 @@ convert_to_tan(expr) := ratsimp(apply1(ratsimp(expr), sin2tan, cos2tan, sec2tan,
 convert_to_tanh(expr) := ratsimp(apply1(ratsimp(expr), sinh2tanh, cosh2tanh, sech2tanh, csch2tanh,tanh2tanh, coth2tanh))$
 
 gradef(tan(x),  1+tan(x)^2)$
-gradef(cot(x), -(tan(x)^2+1)/tan(x)^2))$
+gradef(cot(x), -(tan(x)^2+1)/tan(x)^2)$
 
 gradef(tanh(x), 1-tanh(x)^2)$
 gradef(coth(x), (tanh(x)^2-1)/tanh(x)^2)$
