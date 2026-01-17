@@ -9,6 +9,7 @@
  *  Dimiter Prodanov:
  *  Support for Wright Omega function added
  *  Support for BesselJ and BesselI functions added 
+ *  Support for erf functions added 
  **************************************/
 
  /**************************************
@@ -29,12 +30,12 @@ atom_parts(expr) :=
   else if member(op(expr), ["+", "-", "*", "/"]) then apply(union, map(atom_parts, args(expr)))
   else union({expr}, 
   lreduce(union, map(atom_parts, args(expr)))
- );
+);
 
-pmint_lcm(lst) := if not emptyp(lst) then 
+pmint_lcm(lst) := block([], if not emptyp(lst) then 
 		apply("*", lst)/lreduce('gcd, lst)
-		else lst;
-
+		else lst
+);
 
 pmint_total_degree(expr) :=
   if numberp(expr) or floatnump(expr) or bfloatp(expr) then 0
@@ -55,33 +56,48 @@ pmint_allcoeffs(expr, vars) := block([v,e,i,eqs:[expr],eqs1:[], nn],
         if ratcoeff(e,v,i)#0 then
           eqs1 : append(eqs1, [ratcoeff(e,v,i)]))),
     eqs : eqs1),
-  eqs);
+  eqs
+);
 
 
 /**************************************
  *
- *   Change trig function to tan
- *   Make diff(tan(x),x)=1+tan(x)^2 and define diff(lambert_w(x), x)
+ *   Express trig functions to tan
+ *   Make diff(tan(x),x)=1+tan(x)^2  
  *
  **************************************/
+define_variable(convert_trig_functions, false, boolean)$
 
-define_variable(convert_trig_functions, true, boolean)$
-
-matchdeclare([%x, %y], true)$
+matchdeclare([%x, %y], true, %z, mapatom)$
 defrule(sin2tan, sin(%x), 2*tan(%x/2)/(tan(%x/2)^2+1))$
-defrule(csc2tan, sin(%x), tan(%x/2)(tan(%x/2)^2+1)/(2*tan(%x/2)))$
+defrule(csc2tan, csc(%x), (tan(%x/2)^2+1)/(2*tan(%x/2)))$
 defrule(cos2tan, cos(%x), (1-tan(%x/2)^2)/(1+tan(%x/2)^2))$
 defrule(sec2tan, sec(%x), (1+tan(%x/2)^2)/(1-tan(%x/2)^2))$
+defrule(tan2tan, tan(%z), 2*tan(%z/2)/(1-tan(%z/2)^2))$
+defrule(cot2tan, cot(%z), (1-tan(%z/2)^2)/(2*tan(%z/2)))$
 
-convert_to_tan(expr) := ratsimp(apply1(ratsimp(expr), sin2tan, cos2tan, sec2tan, csc2tan))$
+defrule(sinh2tanh, sinh(%x), (2*tanh(%x/2))/(1-tanh(%x/2)^2))$
+defrule(csch2tanh, csch(%x), (1-tanh(%x/2)^2)/(2*tanh(%x/2)))$
+defrule(cosh2tanh, cosh(%x), (1+tanh(%x/2)^2)/(1-tanh(%x/2)^2))$
+defrule(sech2tanh, sech(%x), (1-tanh(%x/2)^2)/(1+tanh(%x/2)^2))$
+defrule(tanh2tanh, tanh(%z), 2*tanh(%z/2)/(1+tanh(%z/2)^2))$
+defrule(coth2tanh, coth(%z), (1+tanh(%z/2)^2)/(2*tanh(%z/2)))$
+
+convert_to_tan(expr) := ratsimp(apply1(ratsimp(expr), sin2tan, cos2tan, sec2tan, csc2tan, tan2tan, cot2tan))$
+convert_to_tanh(expr) := ratsimp(apply1(ratsimp(expr), sinh2tanh, cosh2tanh, sech2tanh, csch2tanh,tanh2tanh, coth2tanh))$
 
 gradef(tan(x),  1+tan(x)^2)$
+gradef(cot(x), -(tan(x)^2+1)/tan(x)^2)$
+
 gradef(tanh(x), 1-tanh(x)^2)$
+gradef(coth(x), (tanh(x)^2-1)/tanh(x)^2)$
 
 /*
 Lambert W function
 */
 gradef(lambert_w(x), lambert_w(x)/(x*(lambert_w(x)+1)))$
+alias (W, lambert_w);
+
 /*
 Wright Omega function
 */
@@ -89,12 +105,7 @@ gradef(omega(x), omega(x)/(1+omega(x)))$
 
 /*
 * Workarounds for Bessel functions
-possible to define directly
-gradef( bessel_j(n,x), 0, (n*bessel_j(n,x))/x-bessel_j(n+1,x) );
-gradef( bessel_i(n,x), 0, (n*bessel_i(n,x))/x+bessel_i(n+1,x) );
-but the computation is slow
 */
-
 gradef(bessj(n, x),  x,  n*bessj(n, x)/x - bessj1(n, x)  );
 gradef(bessj1(n, x), x,  bessj(n, x)-(n+1)*bessj1(n, x)/x );
 
@@ -107,7 +118,12 @@ gradef(bessi1(n, x), x,  bessi(n, x)-(n+1)*bessi1(n, x)/x );
 gradef(bessk(n, x),  x,  n*bessk(n, x)/x + bessk1(n, x)  );
 gradef(bessk1(n, x), x,  bessk(n, x)-(n+1)*bessk1(n, x)/x );
 
-matchdeclare( %n, atom)$
+/* Workarounds for gaussian and erf */
+gradef(ga(x), -2*x*ga(x));
+gradef(erf1(x), (2*ga(x))/sqrt(%pi));
+gradef(erf2(x), (4*ga(x)*erf(x))/sqrt(%pi));
+
+matchdeclare(%n, atom)$
 defrule(bessj2b, bessel_j( %n, %x), bessj( %n, %x)) ;
 defrule(b2bessj,  bessj( %n, %x), bessel_j( %n, %x)) ;
 
@@ -138,16 +154,19 @@ convert_b2bess(expr):=apply1(expr, b2bessj, b2bessj1, b2bessy, b2bessy1, b2bessi
 
 /*
 polylogarithms
+*/
+gradef(li2(x), -log(1-x)/x);
+defrule(li2pli, li[2](%x), li2(%x) ) ;
+defrule(pli2li, li2  (%x), li[2](%x)) ;
+ 
+/* Workarounds for Ei */
+gradef(ei(x), dei(x));
+gradef(dei(x), dei(x)-dei(x)/x );
 
-gradef(pli(n,x), 0, pli1(n,x)/x);
-
-defrule(li2pli, li[%n] ( %x), pli( %n, %x)) ;
-defrule(pli2li,  pli( %n, %x), li[%n]( %x)) ;
-defrule(pli2li1,  pli1( %n, %x), li[%n-1]( %x)) ;
 
 convert_li2p(expr):=apply1(expr, li2pli);
-convert_p2li(expr):=apply1(expr, pli2li,pli2li1);
-*/
+convert_p2li(expr):=apply1(expr, pli2li);
+
 
 defrule(log2atan, log( (%i+%x)/(%x-%i)), -2*%i*atan(%x)  );
 defrule(log2atan1, %n*log((%x+%i)/(%x-%i)), -2*%n*%i*atan(%x)  );
@@ -159,19 +178,26 @@ convert2atan(expr):=block([ret],
 
 matchdeclare([%m], atom);
 defrule(tan2sin, tan(%m/2),  sin(%m)/(1+cos(%m)))$
-convert_from_tan(expr):=ratsimp(apply1(expr, tan2sin))$
-/*
+defrule(tanh2sinh, tanh(%m/2),  sinh(%m)/(1+cosh(%m)))$
 
+convert_from_tan(expr):=block([ret],
+	ret: apply1(expr, tan2sin),
+	ret: ratsimp(ret),
+	ret: trigrat(ret)
+);
+	
+convert_from_tanh(expr):=ratsimp(apply1(expr, tanh2sinh))$
+
+/*
 defrule(f2hg, %f[%n,%m], hg);
 convert_hg(expr):=apply1(expr, f2hg);
-
 
 lprod(lst):= block([], if listp(lst) then (
 	if oddp(length(lst)) then push(1, lst),  
 	substinpart("*", lst, 0)
 ) elseif lst=0 then 0 else 'lprod(lst) );
 
-gradef(hg (la,x), 0, lprod('first(la))/ lprod('second(la))*hg1(la, x));
+gradef(hg (la, x), 0, hg1(la, x)/x - lprod('first(la))/ lprod('second(la))/x);
 */
 
 /**************************************
@@ -187,7 +213,6 @@ put(tan, [ lambda([u], 1+u^2), false], 'darboux_poly)$
 put(tanh, [ lambda([u], 1-u^2), false], 'darboux_poly)$
 put(lambert_w, [ lambda([u], u), true], 'darboux_poly)$
 put(omega, [ lambda([u], u), true], 'darboux_poly)$
-
 put(bessj, [ lambda([u], u), false], 'darboux_poly)$
 put(bessj1, [ lambda([u], u), false], 'darboux_poly)$
 put(bessy, [ lambda([u], u), false], 'darboux_poly)$
@@ -196,14 +221,17 @@ put(bessi, [ lambda([u], u), false], 'darboux_poly)$
 put(bessi1, [ lambda([u], u), false], 'darboux_poly)$
 put(bessk, [ lambda([u], u), false], 'darboux_poly)$
 put(bessk1, [ lambda([u], u), false], 'darboux_poly)$
-put(expintegral_ei, [ lambda([u], u), false], 'darboux_poly)$
+/* exponential ingegral */
+put(ei, [ lambda([u], u), false], 'darboux_poly)$
+put(li2, [ lambda([u], u), false], 'darboux_poly)$
+put(ga, [ lambda([u], -2*u), true], 'darboux_poly)$
+put(erf1, [ lambda([u], u), false], 'darboux_poly)$
+/* put(erf2, [ lambda([u], u), false], 'darboux_poly)$ erf^2*/
 
 
 /*
-put(gamma_incomplete, [ lambda([u], u), false], 'darboux_poly)$
-put(hg1, [ lambda([u], u), false], 'darboux_poly)$*/
-
-
+put(hg1, [ lambda([u], u), false], 'darboux_poly)$
+*/
 
 get_special_polys(f, l) :=
   if atom(f) or  listp(f) then 0
@@ -251,7 +279,7 @@ pmints(intexp, [simpfun]):=block ([ret:nil ],
 		ret: map(lambda([u], pmints (u, simpfun)), intexp) 
  	elseif sop=nounify(integrate) then (
 		ret:subst(nounify(integrate)= lambda ([u,v], 
-				pmint(u,v)), intexp
+				pmintr(u,v)), intexp
 		)
 	),
 	if not emptyp(simpfun) then (
@@ -264,98 +292,158 @@ pmints(intexp, [simpfun]):=block ([ret:nil ],
 	ret
 );
 
+
+pmintr(expr, x):=block ([u, ret],
+ if mapatom(expr) then pmint(expr, x)
+ else 
+	if op(expr)="+" or op(expr)="+" then
+		map(lambda([u], pmint(u, x)), expr)
+	elseif op(expr)="/" then (
+		ret: partfrac(expr, x),
+		ret:pmintr(ret, x),
+		logcontract(ret)
+	)else
+		pmint(expr, x)
+);
+
 /* checks if the the expression contans Bessel functions*/
 besselp(expr):=not (freeof(bessel_j, expr) and freeof(bessel_i, expr) and  freeof(bessel_y, expr) and  freeof(bessel_k, expr) );
 
-/* checks if the the expression contans trigonometric functions*/
+/* checks if the the expression contains trigonometric functions*/
 trigp(expr):=not (freeof(sin, expr) and freeof(cos, expr) and  freeof(tan, expr) and  freeof(cot, expr)
 and  freeof(sec, expr) and  freeof(csc, expr));
 
-pmint(expr, x) := block(
-  [ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr) ],
+/* checks if the the expression contains hyperbolic functions*/
+trighp(expr):=not (freeof(sinh, expr) and freeof(cosh, expr) and  freeof(tanh, expr) and  freeof(coth, expr)
+and  freeof(sech, expr) and  freeof(csch, expr));
 
-  /* 0) preproces expr */
-  if convert_trig_functions then
-    ff : convert_to_tan(expr)
-  else
+
+pmint(expr, x) := block(
+  [ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, 
+   bconvert:false, btrig:trigp(expr), btrigh:trighp(expr), gx, dd, 
+   logexpand:super, ibp_result, %b, %a, %rr, %x, erfconvert:false],
+  
+  /* 0) preprocess expr */
+  expr : expand(expr, 0),
+
+  if convert_trig_functions and btrig then (
+    ff : convert_to_tan(expr),
+    ff : convert_to_tanh(ff),
+    convert_trig_functions:true
+  ) else (
     ff : expr,
- 
+    convert_trig_functions: false
+  ),
+
   if besselp(ff) then (
-	ff: convert_bess2b(ff),
-	bconvert:true
+    ff : convert_bess2b(ff),
+    bconvert : true
   ),
  
-  ff : factor(ff),
-  pm_display(1, 'function=ff),
+ ff : factor(ff),
+  if gaussp(ff, x) or not freeof(erf, ff) then (
+    ff : ga2exp(expr),
+    ff : erf2e1(expr),
+    ff : gaussubst(ff, x),
+    erfconvert:true
+  ),
+ 
 
+  pm_display(1, 'function=ff),
+  
   /* 1) substitute expressions */
   si0 : setify(listofvars(ff)),
-  si0 : subset(si0, lambda([u], is(diff(u,x)#0))),
-  si : subset(atom_parts(ff), lambda([u], is(diff(u,x)#0))),
+  si0 : subset(si0, lambda([u], is(diff(u, x) # 0))),
+  si : subset(atom_parts(ff), lambda([u], is(diff(u, x) # 0))),
   pm_display(1, 'atom_parts=si),
-  si1 : apply(union, listify(map(atom_parts, map(lambda([u], diff(u,x)), si)))),
-  si : union(subset(si1, lambda([u], is(diff(u,x)#0))), si),
+  
+  si1 : apply(union, listify(map(atom_parts, map(lambda([u], diff(u, x)), si)))),
+  si : union(subset(si1, lambda([u], is(diff(u, x) # 0))), si),
   si : setdifference(si, si0),
   li : reverse(append(args(si0), args(si))),
   lin : makelist(d=gensym(), d, li),
-  lout : makelist(rhs(d)=lhs(d), d, lin),
-  pm_display(1, 'substitution=lin),
-
+  lout : map(reverse, lin),
+  pm_display(1, 'substitution1=lout),
+  pm_display(1, 'substitution2=lin),
+  
   /* 2) get derivation info */
-  ld : map(lambda([u], diff(u,x)), li),
+  ld : map(lambda([u], diff(u, x)), li),
   ld : subst(lin, ld),
-  q : pmint_lcm(makelist(denom(ratsimp(d)), d, ld)),
-  l : makelist(ratsimp(q*d), d, ld),
+  gx : assoc(x, lin),
+  dd : map(ratsimp, ld),
+  
+  q : pmint_lcm(makelist(denom(d * coeff(num(d), gx)), d, dd)),
+  l : makelist(q * d, d, dd),
   vars : map(lhs, lout),
   dx : [vars, l],
   pm_display(1, 'deriv_info=dx),
-
+  
   /* 3) get special darboux polys */
   ls : makelist(get_special_polys(d, lin), d, li),
   ls : delete(0, ls),
   ls : map(args, ls),
-
+  
   /* 4) integrate substitution */
   fint : subst(lout, pm_integrate(subst(lin, ff), dx, q, vars, ls)),
   
   
-   
-  if not(mapatom(fint)) and freeof( 'integrate, fint) then block([dfint : diff(fint, x), re ],
-  display(fint),
-  /* checking the solution */
-  re:dfint-expr,
+  /* 5) verifying the candidate solution */
+  if not mapatom(fint) and freeof('integrate, fint) then block(
+    [dfint : diff(fint, x), re],
+    display(fint),
+    
+    /* checking the solution */
+    re : dfint - expr,
+    if erfconvert then (
+      re : ga2exp(re),
+      re : e12erf(re)
+    ),
+    if expand(re, 0) # 0 then (
+      if btrig then (
+        re : trigrat(trigsimp(re)), 
+        print("Trigonometric simplification 1 " + re)
+      ),
+      re : ratsimp(re),
+      if re # 0 then (
+        re : radcan(re),
+        if re # 0 then (
+          re : ratsimp(dfint - ff),
+          if re # 0 then (
+            if btrig then (
+              re : trigrat(trigsimp(re)), 
+              print("Trigonometric simplification 2 " + re)
+            ),
+            if radcan(re) # 0 then (
+              print("Solution check fails!" + re),
+              fint : 'integrate(expr, x),
+              return(fint)
+            )
+          )
+        )
+      )
+    ),
+    fint : logcontract(fint),
+    if bconvert then
+      fint : convert_b2bess(fint),
+    if convert_trig_functions then (
+      fint : convert_from_tan(fint),
+      fint : convert2atan(fint)
+    ),
 
-  if expand(re,0)#0 then (
-	  if btrig then (re:trigrat(trigsimp(re)), print("Trigonometric simplification 1 " +re)),
-	re:ratsimp(re),
-	if re# 0 then (
-		re:radcan(re),
-		if re#0 then (
-			re:ratsimp(dfint-ff),
-			if re #0 then (
-				if btrig then ( re:trigrat(trigsimp(re)), print("Trigonometric simplification 2 " +re)),
-			if  radcan(re)#0 then (
-				print("Solution check fails!"+ re),
-				fint:'integrate(expr, x),
-				return(fint)
-	))))),
-	if bconvert then
-		fint: convert_b2bess(fint),
-
-	if convert_trig_functions then (
-		/*fint : convert2atan(fint),*/
-		fint : convert_from_tan(fint)
-	),
-	/*display(fint),*/
-	fint
-  ) else
+    if erfconvert then (
+      fint : ga2exp(fint),
+      fint : e12erf(fint)
+    ),
+    fint
+  ) 
+  else 
     'integrate(expr, x)
 )$
 
 /**************************************
  *
  * f    - substitution
- * d    - differential infos
+ * d    - differential data
  * q    - denominator of differentials
  * vars - variables in expression
  * ls   - special darboux polys
@@ -363,7 +451,7 @@ pmint(expr, x) := block(
  **************************************/
 
 pm_integrate(f, d, q, vars, ls) := block(
-  [splq, s, ff, df, spl, cden, dg, monomials, cand, lunk, sol, i, listarith:true ],
+  [splq, s, ff, df, spl, cden, dg, monomials, cand, lunk, sol, i, F_erf, listarith:true ],
 
   pm_display(1, 'expr=f),
 
@@ -375,6 +463,7 @@ pm_integrate(f, d, q, vars, ls) := block(
   ff : ratsimp(f),
   df : denom(ff),
   spl : split_factor(df, d),
+ 
   cden : s * spl[1] * deflation(spl[2], d),
   pm_display(1, 'denominator=cden),
 
@@ -395,6 +484,63 @@ pm_integrate(f, d, q, vars, ls) := block(
     log-parts are added in try_integral
   */
   cand : (lunk . monomials) / cden,
+
+  
+  /* Add erf/erfi candidates when ga(...) appears WITHOUT corresponding erf */
+  erf_candidates : [],
+  erf_unks : [],
+  /*
+  for i:1 thru length(vars) do (
+    /* Check if vars[i] corresponds to a ga(...) in the original expression */
+    corresponding_expr : assoc(vars[i], lout),
+    if not atom(corresponding_expr) and op(corresponding_expr) = 'ga then (
+      /* Get the argument of ga */
+      ga_arg : part(corresponding_expr, 1),
+      /* Check if erf(ga_arg) is already a substituted variable in lout */
+      erf_already_present : false,
+      for j:1 thru length(lout) do (
+        if not atom(rhs(lout[j])) and op(rhs(lout[j])) = 'erf1 then (
+          if part(rhs(lout[j]), 1) = ga_arg then
+            erf_already_present : true
+        )
+      ),
+      /* Only add erf candidate if not already present */
+      if not erf_already_present then (
+        new_unk : gensym(),
+        erf_candidates : append(erf_candidates, [new_unk * erf1(ga_arg)]),
+        erf_unks : append(erf_unks, [new_unk])
+      )
+    )
+  ),
+*/
+for i:1 thru length(vars) do block([orig, ga_arg, new_unk],
+  orig : assoc(vars[i], lout),
+  if not atom(orig) and op(orig) = 'ga then (
+    ga_arg : part(orig, 1),
+    new_unk : gensym(),
+    erf_candidates : endcons(new_unk * erf1(ga_arg), erf_candidates),
+    erf_unks : endcons(new_unk, erf_unks)
+  )
+),
+
+if length(erf_candidates) > 0 then (
+  erf_candidates : subst(lin, erf_candidates),
+  cand : cand + apply("+", erf_candidates),
+  lunk : append(lunk, erf_unks)
+), 
+
+  /* In pm_integrate, modify erf candidate generation */
+  if length(erf_candidates) > 0 then (
+    /* Substitute x and other original vars into erf candidates using lin */
+    erf_candidates : subst(lin, erf_candidates),
+    cand : cand + apply("+", erf_candidates),
+    lunk : append(lunk, erf_unks)
+  ),
+
+  pm_display(1, 'erf_candidates=erf_candidates),
+
+
+  
   sol : try_integral(f, d, q, vars, cand, lunk, spl[1], spl[2], splq[1], ls, true),
   if sol[1]=true then
     sol : try_integral(f, d, q, vars, cand, lunk, spl[1], spl[2], splq[1], ls, false),
@@ -418,38 +564,79 @@ pm_integrate(f, d, q, vars, ls) := block(
  *  real      - get candidates for log parts using gfactor?
  *
  **************************************/
-
 try_integral(f, d, q, vars, cand, lunk, l1, l2, l3, ls, real) := block(
-  [candlog, p, candidate, i, sol, candidate1, redund : [], eqs, eqs1,
-   linsolvewarn:false, solve_inconsistent_error:false, listarith:true ],
+	  [candlog, p, candidate, i, j, sol, candidate1, redund : [], eqs, eqs1,
+	   linsolvewarn:false, solve_inconsistent_error:false, listarith:true,
+	   erf_subst_list : [], temp_vars_list : [], ga_subst_list : [], erf_terms, erf_arg, u],
+	
+	  /* Get log part - all factors can appear */
+	  candlog : append(pmint_factors(l1, real), pmint_factors(l2, real), pmint_factors(l3, real)),
+	  candlog : union(setify(candlog), setify(makelist(p[1], p, ls))),
+	  candlog : subset(candlog, lambda([u], not(constantp(u)))),
+	  candlog : listify(candlog),
+	  redund : makelist(%k2[i], i, 1, length(candlog)),
+	  if length(candlog)>0 then
+	    candidate : cand + redund . map(log, candlog)
+	  else
+	    candidate : cand,
+	  candidate1 : candidate,
+	  pm_display(1, 'log_part=candlog),
+	  pm_display(1, 'candidate_with_erf=candidate),
+	  
+	  /* Find all erf terms in the candidate */
+	  if not freeof(erf1, candidate) then (
+	    erf_terms : subset(atom_parts(candidate), 
+	                       lambda([u], not atom(u) and (op(u) = 'erf1  ) )  ),
+	    erf_terms : listify(erf_terms),
+	    for i:1 thru length(erf_terms) do (
+	      block([temp_erf_var],
+	        temp_erf_var : gensym(),
+	        erf_subst_list : append(erf_subst_list, [erf_terms[i] = temp_erf_var]),
+	        temp_vars_list : append(temp_vars_list, [temp_erf_var]),
+	        /* Add ga substitution for the same argument */
+	        erf_arg : part(erf_terms[i], 1),
+	        ga_subst_list : append(ga_subst_list, [ga(erf_arg) = vars[1]])
+	      )
+	    )
+	  ),
+	  
+	  pm_display(0, 'erf_subst_list=erf_subst_list),
+	  pm_display(0, 'ga_subst_list=ga_subst_list),
+	  pm_display(0, 'temp_vars_list=temp_vars_list),
+	
+	  /* solve f-diff(candidate,x)=0 */
+	  candidate : expand(num(ratsimp(f-total_derivation(d[1], d[2], candidate)/q))),
+	  pm_display(0, 'candidate_after_diff=candidate),
+	  
+	  /* Apply erf and ga substitution before coefficient extraction */
+    if length(erf_subst_list) > 0 then (
+      candidate : subst(erf_subst_list, candidate),
+      /* Expand/ratsimp before ga substitution to ensure pattern matching */
+      for sub in ga_subst_list do (
+        candidate : subst(ratsimp(lhs(sub)) = rhs(sub), ratsimp(candidate))
+      ),
+      pm_display(1, 'candidate_after_subst=candidate),
+      eqs : pmint_allcoeffs(candidate, append(vars, temp_vars_list)),
+      pm_display(1, 'eqs=eqs)
+    ) else (
+      eqs : pmint_allcoeffs(candidate, vars),
+      pm_display(1, 'eqs_no_erf=eqs)
+    ),
 
-  /* Get log part - all factors can appear */
-  candlog : append(pmint_factors(l1, real), pmint_factors(l2, real), pmint_factors(l3, real)),
-  candlog : union(setify(candlog), setify(makelist(p[1], p, ls))),
-  candlog : subset(candlog, lambda([u], not(constantp(u)))),
-  candlog : listify(candlog),
-  redund : makelist(%k2[i], i, 1, length(candlog)),
-  if length(candlog)>0 then
-    candidate : cand + redund . map(log, candlog)
-  else
-    candidate : cand,
-  candidate1 : candidate,
-  pm_display(1, 'log_part=candlog),
-
-  /* solve f-diff(candidate,x)=0 */
-  candidate : expand(num(ratsimp(f-total_derivation(d[1], d[2], candidate)/q))),
-  pm_display(1, 'candidate=candidate),
-  eqs : pmint_allcoeffs(candidate, vars),
-  vars : append(listify(lunk), makelist(%k2[i], i, 1, length(candlog))),
-  if errcatch(sol : linsolve(eqs, vars))=[] then return([true, []]),
-
-  /* substitute solution into candidate */
-  sol : subst(makelist(u=0, u, %rnum_list), sol),
-  candidate1 : subst(sol, candidate1),
-  candidate1 : subst(makelist(u=0, u, redund), candidate1),
-
-  if sol=[] or sol=all then [true, []]
-  else [false, subst(sol, candidate1)])$
+	    
+	  vars : append(listify(lunk), makelist(%k2[i], i, 1, length(candlog))),
+	  pm_display(1, 'vars_for_solve=vars),
+	  if errcatch(sol : linsolve(eqs, vars))=[] then return([true, []]),
+	
+	  pm_display(1, 'sol=sol),
+	  /* substitute solution into candidate */
+	  sol : subst(makelist(u=0, u, %rnum_list), sol),
+	  candidate1 : subst(sol, candidate1),
+	  candidate1 : subst(makelist(u=0, u, redund), candidate1),
+	
+	  if sol=[] or sol=all then [true, []]
+	  else [false, subst(sol, candidate1)])$
+	
 
 /**************************************
  *
@@ -481,7 +668,8 @@ enumerate_monoms(vars, d) := block(
  **************************************/
 
 total_derivation(lv, ld, expr) := block([fp:0, i],
-  for i:1 thru length(ld) do fp : fp+ld[i]*diff(expr, lv[i]),
+  for i:1 thru length(ld) do 
+    fp : fp+ld[i]*diff(expr, lv[i]),
   fp
 )$
 
@@ -530,3 +718,201 @@ pmint_factors(expr, real) := block([%cc%, ff],
   else
     delete(%cc%, makelist(if not(atom(u)) and op(u)="^" then first(u) else u, u, args(gfactor(ff))))
 )$
+
+
+	  
+/* new part handling gaussians and erf */
+
+matchdeclare([%a, %b, %c, %rr], true);
+matchdeclare(%ng, freeof(ga));
+matchdeclare([%x, %n], atom);
+defmatch(sqker1, %rr*exp(%a*%x^2 + %b*%x + %c), %x);
+defmatch(ratexp1, %a*exp(%b));
+defmatch(ga1, %a*ga(%b));
+defmatch(ga2, %ng*ga(%b));
+
+defmatch(exp_erf_pattern, %rr*exp(%b*%x)*erf(%a*%x), %x);
+defmatch(exp_erf_pattern1, %rr*%x^%n*exp(%b*%x)*erf(%a*%x), %x);
+
+gaussp(expr, x):=block([%a, %b, %c, %rr, ret],
+  if atom(expr) then return(false),
+  if op(expr)="+" then 
+		ret: apply("or", maplist( lambda([u], gaussp(u, x)), expr))
+  else (
+	  ret:sqker1(expr, x),
+	  ret:is(ret#false) or not freeof(ga, expr)
+  )
+);
+
+complete_square_cv(expr, t) := block([  aa, bb, cc],
+       if hipow(expr,t)=2 then (
+        aa: ratcoef(expr, t, 2),
+        bb: ratcoef(expr, t, 1),
+        cc: ratcoef(expr, t, 0),
+        /* [ D, F, K] */
+        [ (cc - bb^2/(4*aa)), (t + bb/(2*aa))]
+   ) else []
+);
+
+
+gaussian_exp_sq(expr,xx):=block([%a,%b,%c,%rr,sqexp],
+  sqker1(expr,xx),[%a,%b,%c],
+  append(complete_square_cv(%a*xx^2+%b*xx+%c,xx),[%rr])
+);
+
+sgn(x):=block(
+    if not atom(x) then (if op(x)="-" then -1) 
+    else 
+        if numberp(x) then if x<0 then -1 else 1 
+    else 1
+);
+
+ 
+gaussubst(expr, xx) := block([gf, fr, fr1, result, %a, %b, %c, %rr, scale_factor, assume_pos:true],
+	  if mapatom(expr) or freeof(xx, expr) then return(expr),
+	  
+	  if op(expr)="-" then 
+	    return (-gaussubst(-expr, xx)),
+	  
+	  /* Handle sums */
+	  if op(expr) = "+" then 
+	    return(map(lambda([u], gaussubst(u, xx)), expr)),
+	  
+	  /* Handle products - recurse on each factor */
+	  if op(expr) = "*" then
+	    return(apply("*", map(lambda([u], gaussubst(u, xx)), args(expr)))),
+	  
+	  /* Handle powers and divisions */
+	  if op(expr) = "/" then
+	    return(gaussubst(num(expr), xx) / gaussubst(denom(expr), xx)),
+	    
+	  if op(expr) = "^" and not (part(expr,1) = %e) then
+	    return(expr),
+	  
+	  /* Handle exponentials */
+	 
+	   result: sqker1(expr, xx),  
+
+	  result : gaussian_exp_sq(expr, xx),
+	  
+	  if emptyp(result) or length(result) < 3 then return(expr),
+	  
+	  [fr, gf, fr1] : result,
+	  
+	  /* For exp(-(a^2)*x^2 + ...), %a = -(a^2), so sqrt(-%a) = a */
+	  scale_factor : sqrt(-%a),
+	 
+	  fr1 * exp(fr) * ga(scale_factor * gf)
+	)$
+    
+  
+
+	
+  declare(ga2exp, evfun);
+  ga2exp(expr):=block([u], 
+    subst(ga=lambda([u], exp(-u^2)), expr)
+  );
+  
+
+  
+  declare(e12erf, evfun);
+  e12erf(expr):=block([u], 
+    subst(erf1=lambda([u], erf(u)), expr)
+  );
+  
+  defmatch(erf2_exp_pattern, exp(%b*%x)*erf(%a*%x)^%n, %x);
+  
+  /*
+  defrule(erf22, %rr*erf(%a)^2, %rr*erf2(%a));
+  erf22e(expr):=apply1(expr, erf22);
+  
+  erf2e(expr) := block([u],
+    subst(erf2=lambda([u], erf(u)^2), expr)
+  );
+  */
+  
+  
+  declare(erf2e1, evfun);
+  erf2e1(expr):=block([u], 
+      subst(erf=lambda([u], erf1(u)), expr)
+    );
+  
+  /*Integrate-by-parts wrapper */
+  pmintibp(expr, x) := block([ff, ibp_result, %rr,%a,%b,%n,%x, b ],
+	  ff : expand(expr, 0),
+	
+	  if exp_erf_pattern1(ff, x) # false then 
+          if %n#0 then (
+            display( ff/x^%n),
+            ibp_result : try_exp_erf_ibp(ff/x^%n, x)
+          ) else 
+            ibp_result : try_exp_erf_ibp(ff, x),
+            
+          if ibp_result # false then (
+            if %n#0 then (
+              b: ratcoef(%b, x, 0),
+              ibp_result:(-1)^%n*diff(ibp_result, -b, %n),
+              ibp_result:ga2exp(ibp_result)
+              ),
+            return(ibp_result)
+          
+        ),
+	
+	  /* If no exp*erf pattern (or IBP declined), fall back to original pmint */
+	  pmint(expr, x)
+  )$
+	
+	/* IBP handler in x, delegating the kernel to the original pmint */
+  try_exp_erf_ibp(expr, x) := block([result,  %b, %a, %rr, u, v, v_part, du_dx, kernel, b],
+  
+    result : exp_erf_pattern(expr, x),
+    if result = false then return(result),
+    display (result), 
+    b: ratcoeff(%b, x,0),
+    if b = 0 then return(false),
+    display(b), 
+    u      : expr / ( exp(b*x)),     
+ 
+    v      : 1/b * exp(b*x),
+    v_part : u * v,
+    v_part : ratsimp(v_part),
+    
+    du_dx  : diff(u, x),
+ 
+    du_dx  : ga2exp(du_dx),
+ 
+    kernel : (v * du_dx),
+ 
+    kernel: ratsimp(kernel),
+ 
+    /* Delegate kernel integration to the original pmint */
+    v_part - pmint(kernel, x)
+  )$
+    
+    
+	try_erf2_exp_ibp(expr, x) := block([result, %b, %a, %n, u, v, v_part, du_dx, kernel],
+	
+	  result : erf2_exp_pattern(expr, x),
+	  if result = false or %b=0 then return(false),
+	
+	  /* u = erf(%a*x)^2, dv = exp(%b*x) dx */
+	  u : erf(%a*x)^2,
+	  v : exp(%b*x)/%b,
+	  v_part : u * v,
+	
+	  /* du = 2*erf(%a*x) * (2*%a/sqrt(%pi)) * exp(-(%a*x)^2) */
+	  du_dx : diff(u, x),
+	  
+	  kernel : v * du_dx,
+	  kernel : ratsimp(expand(kernel)),
+	  
+	  v_part - pmint(kernel, x)
+	)$
+    
+    
+/*
+   
+mhipow( expr, x ) := block( [nn], nn: hipow(expr,x),  if  abs(ratcoeff(expr,x,nn))=1  then nn else 0 );
+grexpdec(expr, xx):=block([%a,%b,u,  nn, mm  ], ratexp1(expr), [nn,mm  ]:map(lambda([u], mhipow(u, xx)),   [%a,%b  ] ),  nn-mm+1 );
+
+*/
