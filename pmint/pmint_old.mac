@@ -1,0 +1,532 @@
+/**************************************
+ *
+ *  PMINT : Poor man's integrator
+ *   http://www-sop.inria.fr/cafe/Manuel.Bronstein/pmint/
+ *  This is a port of pmint Maple program by Manuel Bronstein to maxima.
+ *
+ *  Ported by Andrej Vodopivec (andrej.vodopivec@gmail.com).
+ *
+ *  Dimiter Prodanov:
+ *  Support for Wright Omega function added
+ *  Support for BesselJ and BesselI functions added 
+ **************************************/
+
+ /**************************************
+ *
+ *  Implementation of some utility functions I could not find in maxima
+ *
+ **************************************/
+halfangles : false;
+ 
+define_variable(verbose_level, 0, integer)$
+pm_display(lev, [arg]) := if lev<=verbose_level then apply(print, arg)$
+
+atom_parts(expr) :=
+  if emptyp(expr) then {}
+  else if numberp(expr) then {}
+  else if atom(expr) then {expr}
+  else if op(expr)="^" and numberp(part(expr, 2)) then atom_parts(part(expr, 1))
+  else if member(op(expr), ["+", "-", "*", "/"]) then apply(union, map(atom_parts, args(expr)))
+  else union({expr}, 
+  lreduce(union, map(atom_parts, args(expr)))
+ );
+
+pmint_lcm(lst) := if not emptyp(lst) then 
+		apply("*", lst)/lreduce('gcd, lst)
+		else lst;
+
+
+pmint_total_degree(expr) :=
+  if numberp(expr) or floatnump(expr) or bfloatp(expr) then 0
+  else if atom(expr) then 1
+  else if member(op(expr), ["+", "-"]) then apply(max, map(pmint_total_degree, args(expr)))
+  else if op(expr)="*" then apply("+", delete(0, map(pmint_total_degree, args(expr))))
+  else if op(expr)="/" then pmint_total_degree(part(expr, 1)) - pmint_total_degree(part(expr, 1))
+  else if op(expr)="^" and integerp(part(expr, 2)) then part(expr, 2)
+  else 1$
+
+pmint_allcoeffs(expr, vars) := block([v,e,i,eqs:[expr],eqs1:[], nn],
+  for v in vars do (
+    eqs1 : [],
+    for e in eqs do (
+	  nn: hipow(e,v),
+	  if not numberp(nn) then return([]),
+      for i:0 thru nn do (
+        if ratcoeff(e,v,i)#0 then
+          eqs1 : append(eqs1, [ratcoeff(e,v,i)]))),
+    eqs : eqs1),
+  eqs);
+
+
+/**************************************
+ *
+ *   Change trig function to tan
+ *   Make diff(tan(x),x)=1+tan(x)^2 and define diff(lambert_w(x), x)
+ *
+ **************************************/
+
+define_variable(convert_trig_functions, true, boolean)$
+
+matchdeclare([%x, %y], true)$
+defrule(sin2tan, sin(%x), 2*tan(%x/2)/(tan(%x/2)^2+1))$
+defrule(csc2tan, sin(%x), tan(%x/2)(tan(%x/2)^2+1)/(2*tan(%x/2)))$
+defrule(cos2tan, cos(%x), (1-tan(%x/2)^2)/(1+tan(%x/2)^2))$
+defrule(sec2tan, sec(%x), (1+tan(%x/2)^2)/(1-tan(%x/2)^2))$
+
+convert_to_tan(expr) := ratsimp(apply1(ratsimp(expr), sin2tan, cos2tan, sec2tan, csc2tan))$
+
+gradef(tan(x),  1+tan(x)^2)$
+gradef(tanh(x), 1-tanh(x)^2)$
+
+/*
+Lambert W function
+*/
+gradef(lambert_w(x), lambert_w(x)/(x*(lambert_w(x)+1)))$
+/*
+Wright Omega function
+*/
+gradef(omega(x), omega(x)/(1+omega(x)))$
+
+/*
+* Workarounds for Bessel functions
+possible to define directly
+gradef( bessel_j(n,x), 0, (n*bessel_j(n,x))/x-bessel_j(n+1,x) );
+gradef( bessel_i(n,x), 0, (n*bessel_i(n,x))/x+bessel_i(n+1,x) );
+but the computation is slow
+*/
+
+gradef(bessj(n, x),  x,  n*bessj(n, x)/x - bessj1(n, x)  );
+gradef(bessj1(n, x), x,  bessj(n, x)-(n+1)*bessj1(n, x)/x );
+
+gradef(bessy(n, x),  x,  n*bessy(n, x)/x - bessy1(n, x)  );
+gradef(bessy1(n, x), x,  bessy(n, x)-(n+1)*bessy1(n, x)/x );
+
+gradef(bessi(n, x),  x,  n*bessi(n, x)/x + bessi1(n, x)  );
+gradef(bessi1(n, x), x,  bessi(n, x)-(n+1)*bessi1(n, x)/x );
+
+gradef(bessk(n, x),  x,  n*bessk(n, x)/x + bessk1(n, x)  );
+gradef(bessk1(n, x), x,  bessk(n, x)-(n+1)*bessk1(n, x)/x );
+
+matchdeclare( %n, atom)$
+defrule(bessj2b, bessel_j( %n, %x), bessj( %n, %x)) ;
+defrule(b2bessj,  bessj( %n, %x), bessel_j( %n, %x)) ;
+
+defrule(bessy2b, bessel_y( %n, %x), bessy( %n, %x)) ;
+defrule(b2bessy,  bessy( %n, %x), bessel_y( %n, %x)) ;
+
+defrule(bessi2b, bessel_i( %n, %x), bessi( %n, %x)) ;
+defrule(b2bessi,  bessi( %n, %x), bessel_i( %n, %x)) ;
+
+defrule(bessk2b, bessel_k( %n, %x), bessk( %n, %x)) ;
+defrule(b2bessk,  bessk( %n, %x), bessel_k( %n, %x)) ;
+
+defrule(bessj2b1, bessel_j( %n+1, %x), bessj1( %n, %x)) ;
+defrule(b2bessj1,  bessj1( %n, %x), bessel_j( %n+1, %x)) ;
+
+defrule(bessy2b1, bessel_y( %n+1, %x), bessy1( %n, %x)) ;
+defrule(b2bessy1,  bessy1( %n, %x), bessel_y( %n+1, %x)) ;
+
+defrule(bessi2b1, bessel_i( %n+1, %x), bessi1( %n, %x)) ;
+defrule(b2bessi1,  bessi1( %n, %x), bessel_i( %n+1, %x)) ;
+
+defrule(bessk2b1, bessel_k( %n+1, %x), bessk1( %n, %x)) ;
+defrule(b2bessk1,  bessk1( %n, %x), bessel_k( %n+1, %x)) ;
+
+convert_bess2b(expr):=apply1(expr, bessj2b, bessj2b1, bessy2b1, bessy2b, bessi2b, bessi2b1, bessk2b, bessk2b1);
+
+convert_b2bess(expr):=apply1(expr, b2bessj, b2bessj1, b2bessy, b2bessy1, b2bessi, b2bessi1, b2bessk, b2bessk1 );
+
+/*
+polylogarithms
+
+gradef(pli(n,x), 0, pli1(n,x)/x);
+
+defrule(li2pli, li[%n] ( %x), pli( %n, %x)) ;
+defrule(pli2li,  pli( %n, %x), li[%n]( %x)) ;
+defrule(pli2li1,  pli1( %n, %x), li[%n-1]( %x)) ;
+
+convert_li2p(expr):=apply1(expr, li2pli);
+convert_p2li(expr):=apply1(expr, pli2li,pli2li1);
+*/
+
+defrule(log2atan, log( (%i+%x)/(%x-%i)), -2*%i*atan(%x)  );
+defrule(log2atan1, %n*log((%x+%i)/(%x-%i)), -2*%n*%i*atan(%x)  );
+defrule(log2atan2, log((%x+%i)^%n/(%x-%i)^%n), -2*%n*%i*atan(%x)  );
+
+convert2atan(expr):=block([ret],
+	apply1(logcontract(expr), log2atan, log2atan1, log2atan2)
+);
+
+matchdeclare([%m], atom);
+defrule(tan2sin, tan(%m/2),  sin(%m)/(1+cos(%m)))$
+convert_from_tan(expr):=ratsimp(apply1(expr, tan2sin))$
+/*
+
+defrule(f2hg, %f[%n,%m], hg);
+convert_hg(expr):=apply1(expr, f2hg);
+
+
+lprod(lst):= block([], if listp(lst) then (
+	if oddp(length(lst)) then push(1, lst),  
+	substinpart("*", lst, 0)
+) elseif lst=0 then 0 else 'lprod(lst) );
+
+gradef(hg (la,x), 0, lprod('first(la))/ lprod('second(la))*hg1(la, x));
+*/
+
+/**************************************
+ *
+ *   Special Darboux polynomials p (x):
+ *   Def: Df(x) = p(x) * f(x)
+ *   If the second parameter is false, only use it for log parts, otherwise use it
+ *   for denominator too.
+ *
+ **************************************/
+
+put(tan, [ lambda([u], 1+u^2), false], 'darboux_poly)$
+put(tanh, [ lambda([u], 1-u^2), false], 'darboux_poly)$
+put(lambert_w, [ lambda([u], u), true], 'darboux_poly)$
+put(omega, [ lambda([u], u), true], 'darboux_poly)$
+
+put(bessj, [ lambda([u], u), false], 'darboux_poly)$
+put(bessj1, [ lambda([u], u), false], 'darboux_poly)$
+put(bessy, [ lambda([u], u), false], 'darboux_poly)$
+put(bessy1, [ lambda([u], u), false], 'darboux_poly)$
+put(bessi, [ lambda([u], u), false], 'darboux_poly)$
+put(bessi1, [ lambda([u], u), false], 'darboux_poly)$
+put(bessk, [ lambda([u], u), false], 'darboux_poly)$
+put(bessk1, [ lambda([u], u), false], 'darboux_poly)$
+put(expintegral_ei, [ lambda([u], u), false], 'darboux_poly)$
+
+
+/*
+put(gamma_incomplete, [ lambda([u], u), false], 'darboux_poly)$
+put(hg1, [ lambda([u], u), false], 'darboux_poly)$*/
+
+
+
+get_special_polys(f, l) :=
+  if atom(f) or  listp(f) then 0
+  else block([pol , sop:op(f)],
+  	/*display(sop, f),*/
+	if not symbolp(sop) and not listp(sop) and not sop="^" then sop:op(sop),
+	pol:  get(sop, 'darboux_poly),
+    if pol#false then
+      [pol[1](subst(l,f)), pol[2]]
+    else
+      0)$
+
+/**************************************
+ *
+ *   The algorithm
+ *
+ **************************************/
+
+define_variable(%k1, %k1, any)$
+define_variable(%k2, %k2, any)$
+
+/**************************************
+ *
+ *  1) substitute all sub-expressions in expr and diff(expr, x) for new variables:
+ *     expr = x*sin(x) -> [x=g1, sin(x)=g2, cos(x)=g3]
+ *
+ *  2) get derivation info:
+ *       [[g1,g2,g3], [1,g3,-g2]]
+ *     diff(expr, x) = ( diff(expr, g1)*1 + diff(expr,g2)*g3 + diff(expr,g3)*(-g2) ) / q
+ *
+ *  3) tries to integrate substitution
+ *
+ *  pmint tries to find the result in the form f/g + log(h) where f,g,h are polynomials
+ *  in new variables
+ *
+ *************************************/
+
+/*
+wrapper around the algorithm allowing for simplification of the result
+*/
+pmints(intexp, [simpfun]):=block ([ret:nil ],
+	if freeof('integrate, intexp ) then return(intexp), 
+	sop:op(intexp),
+	if sop="+" or sop="-" then  
+		ret: map(lambda([u], pmints (u, simpfun)), intexp) 
+ 	elseif sop=nounify(integrate) then (
+		ret:subst(nounify(integrate)= lambda ([u,v], 
+				pmint(u,v)), intexp
+		)
+	),
+	if not emptyp(simpfun) then (
+		simpfun:flatten(simpfun),
+		if not emptyp(simpfun) then (
+			simpfun:simpfun[1],
+			ret: apply(simpfun, [ret])
+		)
+	),
+	ret
+);
+
+/* checks if the the expression contans Bessel functions*/
+besselp(expr):=not (freeof(bessel_j, expr) and freeof(bessel_i, expr) and  freeof(bessel_y, expr) and  freeof(bessel_k, expr) );
+
+/* checks if the the expression contans trigonometric functions*/
+trigp(expr):=not (freeof(sin, expr) and freeof(cos, expr) and  freeof(tan, expr) and  freeof(cot, expr)
+and  freeof(sec, expr) and  freeof(csc, expr));
+
+pmint(expr, x) := block(
+  [ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr) ],
+
+  /* 0) preproces expr */
+  if convert_trig_functions then
+    ff : convert_to_tan(expr)
+  else
+    ff : expr,
+ 
+  if besselp(ff) then (
+	ff: convert_bess2b(ff),
+	bconvert:true
+  ),
+ 
+  ff : factor(ff),
+  pm_display(1, 'function=ff),
+
+  /* 1) substitute expressions */
+  si0 : setify(listofvars(ff)),
+  si0 : subset(si0, lambda([u], is(diff(u,x)#0))),
+  si : subset(atom_parts(ff), lambda([u], is(diff(u,x)#0))),
+  pm_display(1, 'atom_parts=si),
+  si1 : apply(union, listify(map(atom_parts, map(lambda([u], diff(u,x)), si)))),
+  si : union(subset(si1, lambda([u], is(diff(u,x)#0))), si),
+  si : setdifference(si, si0),
+  li : reverse(append(args(si0), args(si))),
+  lin : makelist(d=gensym(), d, li),
+  lout : makelist(rhs(d)=lhs(d), d, lin),
+  pm_display(1, 'substitution=lin),
+
+  /* 2) get derivation info */
+  ld : map(lambda([u], diff(u,x)), li),
+  ld : subst(lin, ld),
+  q : pmint_lcm(makelist(denom(ratsimp(d)), d, ld)),
+  l : makelist(ratsimp(q*d), d, ld),
+  vars : map(lhs, lout),
+  dx : [vars, l],
+  pm_display(1, 'deriv_info=dx),
+
+  /* 3) get special darboux polys */
+  ls : makelist(get_special_polys(d, lin), d, li),
+  ls : delete(0, ls),
+  ls : map(args, ls),
+
+  /* 4) integrate substitution */
+  fint : subst(lout, pm_integrate(subst(lin, ff), dx, q, vars, ls)),
+  
+  
+   
+  if not(mapatom(fint)) and freeof( 'integrate, fint) then block([dfint : diff(fint, x), re ],
+  display(fint),
+  /* checking the solution */
+  re:dfint-expr,
+
+  if expand(re,0)#0 then (
+	  if btrig then (re:trigrat(trigsimp(re)), print("Trigonometric simplification 1 " +re)),
+	re:ratsimp(re),
+	if re# 0 then (
+		re:radcan(re),
+		if re#0 then (
+			re:ratsimp(dfint-ff),
+			if re #0 then (
+				if btrig then ( re:trigrat(trigsimp(re)), print("Trigonometric simplification 2 " +re)),
+			if  radcan(re)#0 then (
+				print("Solution check fails!"+ re),
+				fint:'integrate(expr, x),
+				return(fint)
+	))))),
+	if bconvert then
+		fint: convert_b2bess(fint),
+
+	if convert_trig_functions then (
+		/*fint : convert2atan(fint),*/
+		fint : convert_from_tan(fint)
+	),
+	/*display(fint),*/
+	fint
+  ) else
+    'integrate(expr, x)
+)$
+
+/**************************************
+ *
+ * f    - substitution
+ * d    - differential infos
+ * q    - denominator of differentials
+ * vars - variables in expression
+ * ls   - special darboux polys
+ *
+ **************************************/
+
+pm_integrate(f, d, q, vars, ls) := block(
+  [splq, s, ff, df, spl, cden, dg, monomials, cand, lunk, sol, i, listarith:true ],
+
+  pm_display(1, 'expr=f),
+
+  /* guess the denominator */
+  splq : split_factor(q, d),
+  s : splq[1],
+  for i thru length(ls) do
+    if ls[i][2] then s : s*ls[i][1],
+  ff : ratsimp(f),
+  df : denom(ff),
+  spl : split_factor(df, d),
+  cden : s * spl[1] * deflation(spl[2], d),
+  pm_display(1, 'denominator=cden),
+
+  /* guess the degree of numerator */
+  dg : 1 + pmint_total_degree(s) +  max(pmint_total_degree(num(ff)), pmint_total_degree(denom(ff))),
+  monomials : args(enumerate_monoms(vars, dg)),
+  lunk : makelist(%k1[i], i, 1, length(monomials)),
+  pm_display(1, 'num_degree=dg),
+  pm_display(1, 'monom_length=length(monomials)),
+
+  /*
+    candidate for the result is
+
+       linear combinations of all mononials with degree <=dg
+       -----------------------------------------------------  + log-parts
+                             cden
+
+    log-parts are added in try_integral
+  */
+  cand : (lunk . monomials) / cden,
+  sol : try_integral(f, d, q, vars, cand, lunk, spl[1], spl[2], splq[1], ls, true),
+  if sol[1]=true then
+    sol : try_integral(f, d, q, vars, cand, lunk, spl[1], spl[2], splq[1], ls, false),
+  if sol[1]=true then
+    'integrate(expr, x)
+  else sol[2])$
+
+/**************************************
+ *
+ *  try_integral adds the log parts to candidate and
+ *  then solves f-diff(candidate,x)=0
+ *
+ *  f         - expression to be integrated
+ *  d         - derivation info - used for total_derivation
+ *  q         - denominator for total_defivation
+ *  vars      - variables appearing in expression
+ *  cand      - candidate form for the result - without log parts
+ *  lunk      - %k1 added in pm_integrate
+ *  l1,l2,l3  - factors
+ *  ls        - special darboux polys
+ *  real      - get candidates for log parts using gfactor?
+ *
+ **************************************/
+
+try_integral(f, d, q, vars, cand, lunk, l1, l2, l3, ls, real) := block(
+  [candlog, p, candidate, i, sol, candidate1, redund : [], eqs, eqs1,
+   linsolvewarn:false, solve_inconsistent_error:false, listarith:true ],
+
+  /* Get log part - all factors can appear */
+  candlog : append(pmint_factors(l1, real), pmint_factors(l2, real), pmint_factors(l3, real)),
+  candlog : union(setify(candlog), setify(makelist(p[1], p, ls))),
+  candlog : subset(candlog, lambda([u], not(constantp(u)))),
+  candlog : listify(candlog),
+  redund : makelist(%k2[i], i, 1, length(candlog)),
+  if length(candlog)>0 then
+    candidate : cand + redund . map(log, candlog)
+  else
+    candidate : cand,
+  candidate1 : candidate,
+  pm_display(1, 'log_part=candlog),
+
+  /* solve f-diff(candidate,x)=0 */
+  candidate : expand(num(ratsimp(f-total_derivation(d[1], d[2], candidate)/q))),
+  pm_display(1, 'candidate=candidate),
+  eqs : pmint_allcoeffs(candidate, vars),
+  vars : append(listify(lunk), makelist(%k2[i], i, 1, length(candlog))),
+  if errcatch(sol : linsolve(eqs, vars))=[] then return([true, []]),
+
+  /* substitute solution into candidate */
+  sol : subst(makelist(u=0, u, %rnum_list), sol),
+  candidate1 : subst(sol, candidate1),
+  candidate1 : subst(makelist(u=0, u, redund), candidate1),
+
+  if sol=[] or sol=all then [true, []]
+  else [false, subst(sol, candidate1)])$
+
+/**************************************
+ *
+ * enumerates monomials in variables vars up to degree d.
+ *
+ *  ([x,y], 2) -> {1,x,x^2,y,y^2,x*y}
+ *
+ **************************************/
+
+enumerate_monoms(vars, d) := block(
+  [n, x, i, v, s, w],
+  n : length(vars),
+  if n = 0 then {1}
+  else (
+    x : vars[n],
+    v : makelist(vars[i], i, 1, n-1),
+    s : enumerate_monoms(v, d),
+    for i:1 thru d do
+    s : union(s, apply(set, makelist(x^i*w, w, listify(enumerate_monoms(v,d-i))))),
+    s))$
+
+/**************************************
+ *
+ * total derivative of expr in variables lv.
+ * ld are the differentials of corresponding variables.
+ *
+ * (This is really the numerator of total_derivative.)
+ *
+ **************************************/
+
+total_derivation(lv, ld, expr) := block([fp:0, i],
+  for i:1 thru length(ld) do fp : fp+ld[i]*diff(expr, lv[i]),
+  fp
+)$
+
+/**************************************
+ *
+ * split_factor and deflation extract from p things we want in the denominator
+ *
+ **************************************/
+
+split_factor(p, d) := block(
+  [si, x, c, q, spl, s, splh, ddd],
+  si : subset(setify(listofvars(p)), lambda([u], is(expand(total_derivation(d[1], d[2], u))#0))),
+  if length(si)=0 then return([1,p]),
+  x : first(si),
+  c : content(p, x), q : c[2], c : c[1],
+  if c=p then return([1,p]),
+  spl : split_factor(c, d),
+  s : ratsimp( gcd(q,total_derivation(d[1], d[2], q))/gcd(q,diff(q,x)) ),
+  if pmint_total_degree(s)=0 then return([first(spl), q*second(spl)]),
+  splh : split_factor(ratsimp(q/s), d),
+  [first(spl)*first(splh)*s, second(spl)*second(splh)]
+)$
+
+deflation(p, d) := block(
+  [si, x, c, q],
+  si : subset(setify(listofvars(p)), lambda([u], is(expand(total_derivation(d[1], d[2], u))#0))),
+  if length(si)=0 then return(p),
+  x : first(si),
+  c : content(p, x), q : c[2], c : c[1],
+  if c=p then return(p),
+  deflation(c, d) * gcd(q, diff(q, x))
+)$
+
+/**************************************
+ *
+ * returns a list of factors of expr without multiplicities.
+ * if real is false it uses gfactor.
+ *
+ **************************************/
+
+pmint_factors(expr, real) := block([%cc%, ff],
+  ff : expr * %cc%,
+  if numberp(expr) or atom(expr) then return([expr]),
+  if real=true then
+    delete(%cc%, makelist(if not(atom(u)) and op(u)="^" then first(u) else u, u, args(factor(ff))))
+  else
+    delete(%cc%, makelist(if not(atom(u)) and op(u)="^" then first(u) else u, u, args(gfactor(ff))))
+)$
