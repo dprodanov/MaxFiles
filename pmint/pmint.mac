@@ -273,7 +273,7 @@ pmint(expr, x) := block(
   erfconvert:false, gshift:false, shifteq:[] ],
 
   /* 0) preproces expr */
-  if convert_trig_functions then
+  if trigp(expr) and convert_trig_functions then
     ff : convert_to_tan(expr)
   else
     ff : expr,
@@ -287,10 +287,14 @@ pmint(expr, x) := block(
 
   /* Conditional Gaussian/erf preprocessing - only if enabled */
   if enable_erf_integration and (gaussp(ff, x) or not freeof(erf, ff)) then block([%ng, %b, offset:0, scale:1, svar:x],
-    ff : ga2exp(ff),
+    if not freeof(ga, ff) then
+      ff : ga2exp(ff),
+   /*  print("initial form ", ff),*/
     ff : erf2e1(ff),
+    /* print(" erf1 transformation ", ff),*/
     ff : gaussubst(expand(ff), x),
-	display(ff),
+    ff:ratsimp(ff),
+	print(" square completion transformation ", ff),
     /* global shift detection */
     ga2(ff),
     offset: ratcoef(%b, x, 0),
@@ -299,7 +303,7 @@ pmint(expr, x) := block(
     if gshift=true and scale#0 then ( 
       ff:subst(x=svar-offset/scale, ff),
       ff:ratsimp(ff),
-      display(ff),
+      print("shift detection ", ff),
       shifteq:x=x+ offset/scale
       ),
     erfconvert:true
@@ -641,21 +645,33 @@ gaussp(expr, x):=block([%a, %b, %c, %rr, ret],
   )
 )$
 
-/* Complete the square for quadratic expressions */
+/* For testing purposes
 complete_square_cv(expr, t) := block([aa, bb, cc],
   if hipow(expr,t)=2 then (
     aa: ratcoef(expr, t, 2),
     bb: ratcoef(expr, t, 1),
     cc: ratcoef(expr, t, 0),
-    /* [ D, F, K] */
     [ (cc - bb^2/(4*aa)), (t + bb/(2*aa))]
   ) else []
 )$
 
-/* Extract Gaussian kernel from exponential */
 gaussian_exp_sq(expr,xx):=block([%a,%b,%c,%rr,sqexp],
-  sqker1(expr,xx),[%a,%b,%c],
-  append(complete_square_cv(%a*xx^2+%b*xx+%c,xx),[%rr])
+  sqker1(expr,xx),
+  sqexp: %a*xx^2+%b*xx+%c,
+  append(complete_square_cv(sqexp,xx),[%rr,%a])
+)$
+*/
+
+/* Complete the square for quadratic expressions */
+complete_square_cv1(lst) := block([aa, bb, cc, t],
+  [aa, bb, cc, t]:lst,
+    /* [ D, F, K] */
+    [ (cc - bb^2/(4*aa)), (t + bb/(2*aa))]   
+)$
+/* Extract Gaussian kernel from exponential */
+gaussian_exp_sq1(expr,xx):=block([%a,%b,%c,%rr ],
+  sqker1(expr,xx),
+  append(complete_square_cv1([%a,%b,%c,xx]),[%rr,%a])
 )$
 
 /* Sign function */
@@ -685,24 +701,22 @@ gaussubst(expr, xx) := block([gf, fr, fr1, result, %a, %b, %c, %rr, scale_factor
 	  if op(expr) = "/" then
 	    return(gaussubst(num(expr), xx) / gaussubst(denom(expr), xx)),
 	  
-/*      
-	  if op(expr) = "^" and not (part(expr,1) = %e) then
-	    return(expr),
-*/	  
 	  /* Handle exponentials */
-	 
-      result: sqker1(expr, xx),  
 
-	  result : gaussian_exp_sq(expr, xx),
+	  result : gaussian_exp_sq1(expr, xx),
 	  
 	  if emptyp(result) or length(result) < 3 then return(expr),
 	  
-	  [fr, gf, fr1] : result,
+	  [fr, gf, fr1, %a] : result,
 	  
 	  /* For exp(-(a^2)*x^2 + ...), %a = -(a^2), so sqrt(-%a) = a */
-	  scale_factor : sqrt(-%a),
-	 
-	  fr1 * exp(fr) * ga(scale_factor * gf)
+      if sgn(%a)=-1 then (
+        scale_factor : sqrt(-%a),	 
+        fr1 * exp(fr) * ga(scale_factor * gf)
+      ) else (
+        scale_factor : sqrt(%a),	 
+        fr1 * exp(fr) / ga(scale_factor * gf)
+      )
 	)$
 
 /* Conversion functions */
