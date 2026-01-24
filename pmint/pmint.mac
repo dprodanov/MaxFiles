@@ -8,7 +8,10 @@
  *
  *  Dimiter Prodanov:
  *  Support for Wright Omega function added
+ *  Liouvillian functions require special form of the gradient : erf /ga; ei/dei, besj/bess1j
  *  Support for BesselJ and BesselI functions added 
+ *  Support for erf/ Gaussian functions added 
+ *  Support for ei/ exp/x functions added 
  **************************************/
 
  /**************************************
@@ -23,7 +26,7 @@ pm_display(lev, [arg]) := if lev<=verbose_level then apply(print, arg)$
 
 /* Control flags for special function integration */
 define_variable(enable_erf_integration, false, boolean)$
-/* define_variable(enable_gaussian_substitution, false, boolean)$ */
+define_variable(enable_ei_integration, false, boolean)$
 
 atom_parts(expr) :=
   if emptyp(expr) then {}
@@ -270,7 +273,7 @@ and  freeof(sec, expr) and  freeof(csc, expr));
 
 pmint(expr, x) := block(
   [ff, si, si1, li, lin, lout, ld, q, d, l, vars, dx, ls, fint, lc, si0, bconvert:false, btrig:trigp(expr),  
-  erfconvert:false, gshift:false, shifteq:[] ],
+  erfconvert:false, gshift:false, shifteq:[], eiconvert:false ],
 
   /* 0) preproces expr */
   if trigp(expr) and convert_trig_functions then
@@ -285,7 +288,7 @@ pmint(expr, x) := block(
  
   ff : factor(ff),
 
-  /* Conditional Gaussian/erf preprocessing - only if enabled */
+  /* Conditional Gaussian/erf preprocessing */
   if enable_erf_integration and (gaussp(ff, x) or not freeof(erf, ff)) then block([%ng, %b, offset:0, scale:1, svar:x],
     if not freeof(ga, ff) then
       ff : ga2exp(ff),
@@ -294,7 +297,7 @@ pmint(expr, x) := block(
     /* print(" erf1 transformation ", ff),*/
     ff : gaussubst(expand(ff), x),
     ff:ratsimp(ff),
-	print(" square completion transformation ", ff),
+	print("square completion transformation ", ff),
     /* global shift detection */
     ga2(ff),
     offset: ratcoef(%b, x, 0),
@@ -308,7 +311,17 @@ pmint(expr, x) := block(
       ),
     erfconvert:true
   ),
-
+  
+    /* Conditional Ei/dei preprocessing */
+  if enable_ei_integration and not freeof(%e, ff) then (
+    if not freeof(dei, ff) then
+      ff : ei2exp(ff),
+    ff : ratsimp(ff),
+    ff : deisubst(ff,x),
+    print("dei transformation ", ff),
+    ff : eint2ei(ff),
+    eiconvert:true
+  ),
   
   /* 1) substitute expressions */
   si0 : setify(listofvars(ff)),
@@ -374,6 +387,10 @@ pmint(expr, x) := block(
         fint:subst(shifteq, fint),
       fint : ga2exp(fint),
       fint : e12erf(fint)
+    ),
+    if eiconvert then (
+      fint : ei2eint (fint),
+      fint : dei2exp (fint)
     ),
 	fint
   ) else
@@ -443,6 +460,24 @@ pm_integrate(f, d, q, vars, ls) := block(
     pm_display(1, 'erf_candidates=erf_candidates)
   ),
   
+    /* Add ei candidates when enabled */
+  if enable_ei_integration then block([ei_candidates:[], ei_unks:[], orig, ei_arg, new_unk],
+    for i:1 thru length(vars) do (
+      orig : assoc(vars[i], lout),
+      if not atom(orig) and op(orig) = 'dei then (
+        ei_arg : part(orig, 1),
+        new_unk : gensym(),
+        ei_candidates : endcons(new_unk * ei(ei_arg), ei_candidates),
+        ei_unks : endcons(new_unk, ei_unks)
+      )
+    ),
+    if length(ei_candidates) > 0 then (
+      ei_candidates : subst(lin, ei_candidates),
+      cand : cand + apply("+", ei_candidates),
+      lunk : append(lunk, ei_unks)
+    ),
+    pm_display(1, 'ei_candidates=ei_candidates)
+  ),
   
  sol : try_integral(f, d, q, vars, cand, lunk, spl[1], spl[2], splq[1], ls, true),
   if sol[1]=true then
@@ -471,7 +506,8 @@ pm_integrate(f, d, q, vars, ls) := block(
 try_integral(f, d, q, vars, cand, lunk, l1, l2, l3, ls, real) := block(
   [candlog, p, candidate, i, sol, candidate1, redund : [], eqs, eqs1,
     linsolvewarn:false, solve_inconsistent_error:false, listarith:true,
-	 erf_subst_list:[], temp_vars_list:[], ga_subst_list:[], erf_terms, erf_arg, temp_erf_var],
+	 erf_subst_list:[], temp_vars_list:[], ga_subst_list:[], 
+     ei_subst_list:[], dei_subst_list:[] ],
 
   pm_display(1, ['ENTERING_TRY_INTEGRAL]),  
   
@@ -488,8 +524,8 @@ try_integral(f, d, q, vars, cand, lunk, l1, l2, l3, ls, real) := block(
   candidate1 : candidate,
   pm_display(1, 'log_part=candlog),
 
-  /* Handle erf substitution when enabled */
-  if enable_erf_integration and not freeof(erf1, candidate) then (
+  /* Handle erf/ga substitution when enabled */
+  if enable_erf_integration and not freeof(erf1, candidate) then block([erf_terms, erf_arg, temp_erf_var],
     erf_terms : subset(atom_parts(candidate),
                        lambda([u], not atom(u) and op(u) = 'erf1)),
     erf_terms : listify(erf_terms),
@@ -503,6 +539,24 @@ try_integral(f, d, q, vars, cand, lunk, l1, l2, l3, ls, real) := block(
     ),
 
     pm_display(1, 'erf_subst_list=erf_subst_list),
+    pm_display(1, 'temp_vars_list=temp_vars_list)
+  ),
+  
+  /* Handle ei/dei substitution when enabled */
+  if enable_ei_integration and not freeof(ei, candidate) then block([ei_terms, temp_ei_var, ei_arg],
+    ei_terms : subset(atom_parts(candidate),
+                       lambda([u], not atom(u) and op(u) = 'ei)),
+    ei_terms : listify(ei_terms),
+
+    for i:1 thru length(ei_terms) do (
+      temp_ei_var : gensym("e"),
+      ei_subst_list : append(ei_subst_list, [ei_terms[i] = temp_ei_var]),
+      temp_vars_list : append(temp_vars_list, [temp_ei_var]),
+      ei_arg : part(ei_terms[i], 1),
+      dei_subst_list : append(dei_subst_list, [dei(ei_arg) = vars[1]])
+    ),
+
+    pm_display(1, 'ei_subst_list=ei_subst_list),
     pm_display(1, 'temp_vars_list=temp_vars_list)
   ),
   
@@ -520,6 +574,18 @@ try_integral(f, d, q, vars, cand, lunk, l1, l2, l3, ls, real) := block(
   ) else (
     eqs : pmint_allcoeffs(candidate, vars)
   ),
+  
+  /* Apply ei substitutions if needed */
+  if length(ei_subst_list) > 0 then (
+    candidate : subst(ei_subst_list, candidate),
+    for sub in dei_subst_list do
+      candidate : subst(ratsimp(lhs(sub)) = rhs(sub), ratsimp(candidate)),
+    pm_display(1, 'candidate_after_ei_subst=candidate),
+    eqs : pmint_allcoeffs(candidate, append(vars, temp_vars_list))
+  ) else (
+    eqs : pmint_allcoeffs(candidate, vars)
+  ),
+  
   eqs : pmint_allcoeffs(candidate, vars),
   vars : append(listify(lunk), makelist(%k2[i], i, 1, length(candlog))),
   if errcatch(sol : linsolve(eqs, vars))=[] then return([true, []]),
@@ -612,6 +678,13 @@ pmint_factors(expr, real) := block([%cc%, ff],
     delete(%cc%, makelist(if not(atom(u)) and op(u)="^" then first(u) else u, u, args(gfactor(ff))))
 )$
 
+/* Sign function */
+sgn(x):=block(
+  if not atom(x) then (if op(x)="-" then -1) 
+  else 
+    if numberp(x) then if x<0 then -1 else 1 
+  else 1
+)$
 
 
 /**************************************
@@ -630,6 +703,8 @@ defmatch(sqker1, %rr*exp(%a*%x^2 + %b*%x + %c), %x)$
 defmatch(ratexp1, %a*exp(%b))$
 defmatch(ga1, %a*ga(%b))$
 defmatch(ga2, %ng*ga(%b))$
+matchdeclare(%nx, freeof(%x))$
+defmatch(deiker1, %rr *exp(%nx*%x)/%x, %x)$
 
 defmatch(exp_erf_pattern, %rr*exp(%b*%x)*erf(%a*%x), %x)$
 defmatch(exp_erf_pattern1, %rr*%x^%n*exp(%b*%x)*erf(%a*%x), %x)$
@@ -641,11 +716,11 @@ gaussp(expr, x):=block([%a, %b, %c, %rr, ret],
     ret: apply("or", maplist( lambda([u], gaussp(u, x)), expr))
   else (
     ret:sqker1(expr, x),
-    ret:is(ret#false) or not freeof(ga, expr)
+    ret: (is(ret#false) and %a#0) or not freeof(ga, expr)
   )
 )$
 
-/* For testing purposes
+/* For testing purposes*/
 complete_square_cv(expr, t) := block([aa, bb, cc],
   if hipow(expr,t)=2 then (
     aa: ratcoef(expr, t, 2),
@@ -660,7 +735,7 @@ gaussian_exp_sq(expr,xx):=block([%a,%b,%c,%rr,sqexp],
   sqexp: %a*xx^2+%b*xx+%c,
   append(complete_square_cv(sqexp,xx),[%rr,%a])
 )$
-*/
+
 
 /* Complete the square for quadratic expressions */
 complete_square_cv1(lst) := block([aa, bb, cc, t],
@@ -674,13 +749,6 @@ gaussian_exp_sq1(expr,xx):=block([%a,%b,%c,%rr ],
   append(complete_square_cv1([%a,%b,%c,xx]),[%rr,%a])
 )$
 
-/* Sign function */
-sgn(x):=block(
-  if not atom(x) then (if op(x)="-" then -1) 
-  else 
-    if numberp(x) then if x<0 then -1 else 1 
-  else 1
-)$
 
 /* Substitute Gaussian kernels with ga() function */
 gaussubst(expr, xx) := block([gf, fr, fr1, result, %a, %b, %c, %rr, scale_factor, assume_pos:true],
@@ -703,7 +771,7 @@ gaussubst(expr, xx) := block([gf, fr, fr1, result, %a, %b, %c, %rr, scale_factor
 	  
 	  /* Handle exponentials */
 
-	  result : gaussian_exp_sq1(expr, xx),
+	  result : gaussian_exp_sq(expr, xx),
 	  
 	  if emptyp(result) or length(result) < 3 then return(expr),
 	  
@@ -735,8 +803,6 @@ erf2e1(expr):=block([u],
   subst(erf=lambda([u], erf1(u)), expr)
 )$
 
-
-
 /* Integration by parts wrapper for exp*erf patterns */
 pmintibp(expr, x) := block([ff, ibp_result, %rr,%a,%b,%n,%x, b ],
   ff : expand(expr, 0),
@@ -766,7 +832,7 @@ pmintibp(expr, x) := block([ff, ibp_result, %rr,%a,%b,%n,%x, b ],
 try_exp_erf_ibp(expr, x) := block([result,  %b, %a, %rr, u, v, v_part, du_dx, kernel, b],
   result : exp_erf_pattern(expr, x),
   if result = false then return(result),
-  display (result), 
+  /*display (result),*/ 
   b: ratcoeff(%b, x,0),
   if b = 0 then return(false),
   display( b), 
@@ -805,3 +871,51 @@ try_erf2_exp_ibp(expr, x) := block([result, %b, %a, %n, u, v, v_part, du_dx, ker
 )$
 
 /* End of Gaussian/erf support functions */
+
+/**************************************
+ * Ei/dei  functions 
+ *
+ **************************************/
+ 
+declare(ei2eint, evfun)$
+ei2eint(expr):=block([u], 
+  subst(ei=lambda([u], expintegral_ei(u)), expr)
+)$
+
+declare(eint2ei, evfun)$
+eint2ei(expr):=block([u], 
+  subst(expintegral_ei=lambda([u], ei(u)), expr)
+)$
+
+declare(dei2exp, evfun)$
+dei2exp(expr):=block([u], 
+  subst(dei=lambda([u], exp(u)/u), expr)
+)$
+
+deisubst(expr, xx) := block([gf, fr, fr1, result, %a, %nx, %rr, scale_factor, assume_pos:true],
+	  if mapatom(expr) or freeof(xx, expr) then return(expr),
+	  
+	  if op(expr)="-" then 
+	    return (-deisubst(-expr, xx)),
+	  
+	  /* Handle sums */
+	  if op(expr) = "+" then 
+	    return(map(lambda([u], deisubst(u, xx)), expr)),
+	  
+	  /* Handle products - recurse on each factor */
+	  if op(expr) = "*" then
+	    return(apply("*", map(lambda([u], deisubst(u, xx)), args(expr)))),
+	  
+	  /* Handle powers and divisions 
+	  if op(expr) = "/" then
+	    return(gaussubst(num(expr), xx) / gaussubst(denom(expr), xx)),*/
+	  
+	  /* Handle exponentials */
+
+	  result : deiker1(expr, xx),
+      display(result),
+	  if result # false and %nx#0 then
+        %rr*dei(%nx*xx)*%nx
+      else 
+        expr	 
+	)$
